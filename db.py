@@ -1,4 +1,5 @@
 import aiosqlite
+import config
 from datetime import datetime
 
 # Путь к базе данных
@@ -10,7 +11,7 @@ DB_PATH = "database.db"
 
 async def create_tables():
     async with aiosqlite.connect(DB_PATH) as conn:
-        # Таблица пользователей
+        # Пользователи
         await conn.execute("""CREATE TABLE IF NOT EXISTS users(
             us_id INTEGER PRIMARY KEY,
             join_date DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -38,7 +39,7 @@ async def create_tables():
             us_id INT
         );""")
         
-        # Ставки (общая история)
+        # Ставки (история)
         await conn.execute("""CREATE TABLE IF NOT EXISTS bets(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             summa INT,
@@ -47,7 +48,7 @@ async def create_tables():
             us_id INT
         );""")
         
-        # Настройки (подкрутка и т.д.)
+        # Настройки
         await conn.execute("""CREATE TABLE IF NOT EXISTS settings(
             invoice_link TEXT PRIMARY KEY,
             max_amount DEFAULT 25,
@@ -97,14 +98,17 @@ async def get_user(us_id):
             return await cursor.fetchone()
 
 async def save_to_db(us_id, username, referrer=None):
+    if referrer is None:
+        referrer = 0
     async with aiosqlite.connect(DB_PATH) as conn:
         user = await get_user(us_id)
         if not user:
-            # Если рефера нет, ставим 0 или NULL
-            if referrer is None: 
-                referrer = 0
-            await conn.execute("INSERT INTO users (us_id, username, ref, balance) VALUES (?, ?, ?, 0)", (us_id, username, referrer))
+            await conn.execute("INSERT OR IGNORE INTO users (us_id, username, ref, balance) VALUES (?, ?, ?, 0)", (us_id, username, referrer))
             await conn.commit()
+
+# !!! ВАЖНО: ЭТО ИСПРАВЛЕНИЕ ТВОЕЙ ОШИБКИ !!!
+# main.py вызывает db.reg_user, поэтому мы делаем псевдоним
+reg_user = save_to_db 
 
 async def update_balance(us_id, amount):
     async with aiosqlite.connect(DB_PATH) as conn:
@@ -117,9 +121,7 @@ async def update_balance(us_id, amount):
 
 async def create_mine_game(creator_id, creator_name, bet_amount, mines_count, mines_map, message_id):
     async with aiosqlite.connect(DB_PATH) as conn:
-        # Сначала удаляем старые активные игры этого юзера, чтобы не было дублей
         await conn.execute("DELETE FROM mines WHERE creator_id = ? AND status = 'active'", (creator_id,))
-        # Создаем новую
         await conn.execute("""
             INSERT INTO mines (creator_id, creator_name, bet_amount, coeff, mines_count, mines_map, mines_open, status, message_id, step)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -143,14 +145,12 @@ async def update_mines_map(user_id, new_map):
         await conn.commit()
 
 async def update_mines_bets(user_id, bet_amount):
-    # Если нужно обновить сумму ставки в процессе (обычно не используется, но функция была)
     async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute("UPDATE mines SET bet_amount = ? WHERE creator_id = ? AND status = 'active'", (bet_amount, user_id))
         await conn.commit()
 
 async def update_mines_wins(user_id, win_amount):
-    # Эта функция обычно начисляет выигрыш пользователю
-    # Используем update_balance для начисления на основной баланс
+    # Начисляем выигрыш пользователю
     await update_balance(user_id, win_amount)
 
 async def set_status_game(user_id, status):
@@ -159,13 +159,10 @@ async def set_status_game(user_id, status):
         await conn.commit()
 
 async def and_mine_game(user_id):
-    # Завершает игру
     await set_status_game(user_id, 'finished')
 
 async def add_open_field(user_id, field):
-    # Добавляет открытую ячейку к списку (например "A1,B2")
     async with aiosqlite.connect(DB_PATH) as conn:
-        # Сначала получаем текущие
         async with conn.execute("SELECT mines_open FROM mines WHERE creator_id = ? AND status = 'active'", (user_id,)) as cursor:
             row = await cursor.fetchone()
             current = row[0] if row else ""
@@ -178,10 +175,7 @@ async def get_open_field(user_id):
     async with aiosqlite.connect(DB_PATH) as conn:
         async with conn.execute("SELECT mines_open FROM mines WHERE creator_id = ? AND status = 'active'", (user_id,)) as cursor:
             row = await cursor.fetchone()
-            if row:
-                # Возвращаем список или строку
-                return row[0]
-            return ""
+            return row[0] if row else ""
 
 async def update_mines_num(user_id, num):
     async with aiosqlite.connect(DB_PATH) as conn:
@@ -198,11 +192,8 @@ async def update_bet_id(user_id, msg_id):
 # ===================================================
 
 async def create_contest(amount, end_date, msg_id):
+    # end_date приходит строкой или датой. Сохраняем как строку для простоты SQLite
     async with aiosqlite.connect(DB_PATH) as conn:
-        # end_date ожидается в формате 'dd.mm.YYYY HH:MM' или схожем
-        # Преобразуем строку в объект даты для корректного хранения или храним как строку
-        # В твоем коде было: datetime.strptime(date_time_str, '%d.%m.%Y %H:%M')
-        # SQLite хранит даты как строки или числа. Лучше сохранить как строку.
         await conn.execute("""
             INSERT INTO contests(summa, end_date, msg_id, top1_summa, top2_summa, top3_summa, end) 
             VALUES(?, ?, ?, 0, 0, 0, 0)
@@ -246,7 +237,6 @@ async def get_settings():
         async with conn.execute("SELECT * FROM settings") as cursor:
             res = await cursor.fetchone()
             if not res:
-                # Создаем дефолтные, если нет
                 await conn.execute("INSERT INTO settings (max_amount, podkrut) VALUES (25, 0)")
                 await conn.commit()
                 return await get_settings()
