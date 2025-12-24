@@ -1,29 +1,43 @@
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.dispatcher import FSMContext
-import functions
 import asyncio
 import loguru
+import random
+import json
+import requests
+import re
+from datetime import datetime
+
+# Импорты твоих локальных файлов
 import config
 import db
 import states
-import random
-import json
-from keyboards.inline.mines import MineKeyboards
-from filters import IsPrivateCall
-from data.functions.db import get_mines, get_user, save_to_db, \
-                              update_mines_open, update_mines_map, update_mines_bets, \
-                              update_mines_wins, and_mine_game, add_open_field, get_open_field
+import functions
+from filters import IsPrivate, IsPrivateCall
 from states import MinesStorage
-from config import mine_cof
-from data.functions.db import save_to_db, get_user, get_mines, update_mines_bets, \
-                              set_status_game, update_mines_open, update_mines_num, update_bet_id
-from filters import IsPrivate
-from datetime import datetime
-import requests
-import re
 from bet_sender import send_bet
 
+# Если папка keyboards существует, оставляем так. 
+# Если будет ошибка "ModuleNotFoundError", проверь путь к папке.
+try:
+    from keyboards.inline.mines import MineKeyboards
+except ImportWarning:
+    MineKeyboards = None
+
+# Исправленные импорты функций БД (теперь без data.functions)
+from db import (
+    get_mines, get_user, save_to_db, update_mines_open, 
+    update_mines_map, update_mines_bets, update_mines_wins, 
+    and_mine_game, add_open_field, get_open_field,
+    set_status_game, update_mines_num, update_bet_id
+)
+
+# Инициализация бота (данные тянутся из config.py -> os.getenv)
+bot = Bot(token=config.token, parse_mode="HTML")
+dp = Dispatcher(bot, storage=MemoryStorage())
+
+# Далее идет твой код (def back_to_admin и т.д.)
 bot = Bot(token=config.token, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
 
@@ -2522,4 +2536,5 @@ async def on_startup(dp):
     print("Ready")
 
 if __name__ == '__main__':
+
     executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
